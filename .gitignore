@@ -1,0 +1,27 @@
+# Ignore environment variables
+.env
+
+# Ignore output directory and all subfolders
+output/
+output/**
+
+# Ignore data directory (videos, datasets)
+data/
+data/**
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environment (if any)
+venv/
+.env/
+.venv/
+
+# Docker artifacts (optional)
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
