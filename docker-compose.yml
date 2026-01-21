@@ -1,0 +1,28 @@
+services:
+  perception:
+    build: .
+    image: final_year_project:phase2
+    container_name: fyp-phase2-engine
+    
+    # 🚀 ENABLE GPU
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    
+    ipc: host
+    volumes:
+      - ./src:/app/src
+      - ./data:/app/data
+      - ./output:/app/output
+    
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - HEADLESS=True
+    
+    # Load API Keys
+    env_file:
+      - .env
