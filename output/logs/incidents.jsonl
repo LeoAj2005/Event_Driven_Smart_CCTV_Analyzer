@@ -1,5 +1,0 @@
-{"timestamp": "2026-01-20T10:54:47.719842", "event": "Zone Violation", "object_id": 3, "confidence": 0.5384721755981445}
-{"timestamp": "2026-01-20T10:54:50.479824", "event": "Zone Violation", "object_id": 14, "confidence": 0.4101018011569977}
-{"timestamp": "2026-01-20T11:10:21.261831", "event": "Zone Violation", "object_id": 1, "confidence": 0.7427332997322083}
-{"timestamp": "2026-01-20T11:10:24.274345", "event": "Weapon Loitering", "object_id": 1, "confidence": 0.8088503479957581}
-{"timestamp": "2026-01-21T05:41:02.725781", "event": "Zone Violation", "object_id": 21, "confidence": 0.7249967455863953}
