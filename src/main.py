@@ -4,124 +4,255 @@ from ultralytics import YOLO
 import os
 import sys
 import numpy as np
+import threading
+import time
+from datetime import datetime
 
-# Import our custom modules
 from config import *
 from engine import StateEngine
 from incident import IncidentManager
-import train # For auto-training check
 
-def main():
-    # --- 1. MODEL LOADING ---
-    if not os.path.exists(MODEL_PATH):
-        print(f"⚠️ Custom model not found at {MODEL_PATH}")
-        print("🧠 Starting Automatic Training Sequence...")
-        train.train_gun_model()
-    
-    print(f"🚀 STARTING SECURITY PIPELINE | Model: {MODEL_PATH}")
-    model = YOLO(MODEL_PATH)
-    
-    # --- 2. SOURCE SELECTION ---
-    if RTSP_URL and "192.168.X.X" not in RTSP_URL:
-        print(f"📡 CONNECTING TO DROIDCAM: {RTSP_URL}")
-        source = RTSP_URL
+# 🔴 Flask server imports
+from server import (
+    run_server,
+    video_frame,
+    frame_lock,
+    new_incidents,
+    source_queue,
+    source_queue_lock
+)
+
+# -------------------------------
+# GLOBAL CONTROL
+# -------------------------------
+processing_thread = None
+stop_processing = threading.Event()
+
+gun_model = None
+human_model = None
+
+
+# -------------------------------
+# YOUTUBE DOWNLOAD
+# -------------------------------
+def download_youtube(url):
+    import yt_dlp
+    print(f"⬇️ Downloading YouTube video: {url}")
+
+    ydl_opts = {
+        'format': 'best[height<=720]',
+        'outtmpl': '/tmp/youtube_video.%(ext)s',
+        'quiet': True,
+    }
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        return ydl.prepare_filename(info)
+
+
+# -------------------------------
+# PROCESS A SINGLE SOURCE
+# -------------------------------
+def process_source(source):
+    global video_frame
+
+    print(f"🎯 Starting processing for: {source}")
+
+    # Parse source
+    if source.startswith('rtsp:'):
+        src = source[5:]
+    elif source.startswith('youtube:'):
+        src = download_youtube(source[8:])
+    elif source.startswith('file:'):
+        src = source[5:]
     else:
-        print(f"📼 DroidCam not configured. LOADING VIDEO FILE: {FILE_VIDEO_PATH}")
-        source = FILE_VIDEO_PATH
+        src = source
 
-    cap = cv2.VideoCapture(source)
-    
-    # Check connection
+    cap = cv2.VideoCapture(src)
+
     if not cap.isOpened():
-        print("❌ CRITICAL ERROR: Could not open video source!")
-        print(f"   Target: {source}")
-        print("   Hint: If using DroidCam, ensure phone screen is ON and Laptop is on same Wi-Fi.")
-        sys.exit(1)
+        print(f"❌ Cannot open source: {src}")
+        return
 
-    # Get Video Properties
-    width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps    = cap.get(cv2.CAP_PROP_FPS)
-    if fps == 0 or np.isnan(fps): fps = 25.0 # Fallback for streams
-    
-    print(f"✅ Video Stream OK: {width}x{height} @ {fps} FPS")
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if fps <= 0 or fps > 120:
+        fps = 25
 
-    # --- 3. ENGINE INITIALIZATION ---
     brain = StateEngine((width, height))
     incident_manager = IncidentManager()
-    
-    # Visual Annotators
-    box_annotator = sv.BoxAnnotator(thickness=2)
-    label_annotator = sv.LabelAnnotator(text_scale=0.5, text_padding=5)
-    trace_annotator = sv.TraceAnnotator(thickness=2, trace_length=30) # Shows movement path
-    zone_annotator = sv.PolygonZoneAnnotator(zone=brain.zone, color=sv.Color.RED, thickness=2)
-    
-    # Output Debug Stream
-    output_path = "/app/output/final_stream.mp4"
-    out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
 
-    print("🎥 Pipeline Active. Press Ctrl+C to stop.")
+    # --- Visualization ---
+    box_ann_human = sv.BoxAnnotator(thickness=2, color=sv.ColorPalette.DEFAULT)
+    lbl_ann_human = sv.LabelAnnotator(text_scale=0.5, color=sv.ColorPalette.DEFAULT)
 
-    while True:
+    box_ann_gun = sv.BoxAnnotator(thickness=4, color=sv.Color.RED)
+    lbl_ann_gun = sv.LabelAnnotator(text_scale=0.8, color=sv.Color.RED, text_color=sv.Color.WHITE)
+
+    zone_ann = sv.PolygonZoneAnnotator(zone=brain.zone, color=sv.Color.RED, thickness=2)
+    trace_ann = sv.TraceAnnotator(thickness=2, trace_length=30)
+
+    out = cv2.VideoWriter(
+        "/app/output/final_stream.mp4",
+        cv2.VideoWriter_fourcc(*'mp4v'),
+        fps,
+        (width, height)
+    )
+
+    frame_count = 0
+
+    # -------------------------------
+    # PROCESS LOOP
+    # -------------------------------
+    while not stop_processing.is_set():
         ret, frame = cap.read()
         if not ret:
-            print("⚠️ Video stream ended or lost connection.")
             break
-        
-        # Buffer frame for smart clips
+
+        frame_count += 1
+        if frame_count % 30 == 0:
+            print(f"✅ Processing Frame {frame_count}", flush=True)
+
         incident_manager.update_buffer(frame.copy())
         incident_manager.process_recording(frame)
 
-        # --- A. DETECT & TRACK ---
-        # Uses ByteTrack (from config.py) for high-speed tracking
-        results = model.track(
-            frame, 
-            persist=True, 
-            tracker=TRACKER_TYPE,
-            verbose=False,
-            conf=CONFIDENCE_THRESHOLD, 
-            iou=IOU_THRESHOLD
+        # --- HUMAN DETECTION ---
+        results_human = human_model.track(
+            frame, persist=True, verbose=False,
+            classes=[0], tracker=TRACKER_TYPE
         )
-        detections = sv.Detections.from_ultralytics(results[0])
+        dets_human = sv.Detections.from_ultralytics(results_human[0])
 
-        # --- B. COGNITIVE ANALYSIS ---
-        if detections.tracker_id is not None:
-            
-            # Analyze Behavior (Speed, Loitering, Zone)
-            events = brain.update(detections)
-            
-            # Process Events
+        # --- GUN DETECTION ---
+        dets_gun = sv.Detections.empty()
+        if gun_model:
+            results_gun = gun_model.track(
+                frame, persist=True, verbose=False,
+                conf=CONFIDENCE_THRESHOLD,
+                tracker=TRACKER_TYPE
+            )
+            dets_gun = sv.Detections.from_ultralytics(results_gun[0])
+
+        # --- EVENTS ---
+        if dets_gun.tracker_id is not None:
+            events = brain.update(dets_gun)
+
             for e in events:
-                print(f"🔥 ALERT: {e['type']} (ID: {e['id']})")
-                
-                # 1. Log Event
-                inc_id = incident_manager.log_event(e['type'], e['id'], e['conf'])
-                
-                # 2. Trigger Smart Clip Recording
-                incident_manager.trigger_clip_recording(inc_id, width, height, fps)
-                
-                # 3. Flash Alert on Screen
-                alert_color = (0, 0, 255) # Red
-                if "FAST" in e['type']: alert_color = (0, 165, 255) # Orange for running
-                
-                cv2.putText(frame, f"{e['type']}!", (50, 100), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 1.2, alert_color, 3)
+                print(f"🔥 {e['type']} (ID: {e['id']})")
 
-            # --- C. VISUALIZATION ---
-            labels = [f"#{tracker_id}" for tracker_id in detections.tracker_id]
-            
-            # Draw Traces (Path), Boxes, Labels, and Zone
-            frame = trace_annotator.annotate(frame, detections)
-            frame = box_annotator.annotate(frame, detections)
-            frame = label_annotator.annotate(frame, detections, labels=labels)
-            frame = zone_annotator.annotate(frame)
+                incident_id = incident_manager.log_event(
+                    e['type'], e['id'], e['conf']
+                )
 
-        # Write to debug file
+                incident_dict = {
+                    "timestamp": datetime.now().isoformat(),
+                    "event": e['type'],
+                    "object_id": e['id'],
+                    "confidence": e['conf'],
+                    "camera_id": "MAIN_GATE_CAM"
+                }
+
+                new_incidents.append(incident_dict)
+
+                incident_manager.trigger_clip_recording(
+                    incident_id, width, height, fps
+                )
+
+                cv2.putText(
+                    frame, f"ALERT: {e['type']}",
+                    (50, 100), cv2.FONT_HERSHEY_SIMPLEX,
+                    1.5, (0, 0, 255), 4
+                )
+
+        # --- DRAW ---
+        if len(dets_human) > 0:
+            if dets_human.tracker_id is not None:
+                labels = [f"Person #{i}" for i in dets_human.tracker_id]
+                frame = trace_ann.annotate(frame, dets_human)
+            else:
+                labels = [f"Person ({c:.2f})" for c in dets_human.confidence]
+
+            frame = box_ann_human.annotate(frame, dets_human)
+            frame = lbl_ann_human.annotate(frame, dets_human, labels=labels)
+
+        if len(dets_gun) > 0:
+            if dets_gun.tracker_id is not None:
+                labels = [
+                    f"WEAPON #{i} ({c:.2f})"
+                    for i, c in zip(dets_gun.tracker_id, dets_gun.confidence)
+                ]
+            else:
+                labels = [f"WEAPON ({c:.2f})" for c in dets_gun.confidence]
+
+            frame = box_ann_gun.annotate(frame, dets_gun)
+            frame = lbl_ann_gun.annotate(frame, dets_gun, labels=labels)
+
+        frame = zone_ann.annotate(frame)
+
+        # --- STREAM FRAME ---
+        with frame_lock:
+            video_frame = frame.copy()
+
         out.write(frame)
 
     cap.release()
     out.release()
-    print("🏁 Session Ended. Check /output/ folder for logs and clips.")
+    print(f"🛑 Stopped processing: {source}")
 
+
+# -------------------------------
+# MAIN ENTRY
+# -------------------------------
+def main():
+    global processing_thread, gun_model, human_model
+
+    print("🚀 INITIALIZING SYSTEM...")
+
+    # Load models once
+    if os.path.exists(GUN_MODEL_PATH):
+        gun_model = YOLO(GUN_MODEL_PATH)
+        print("✅ Weapon model loaded")
+    else:
+        gun_model = None
+        print("⚠️ Weapon model missing")
+
+    human_model = YOLO(HUMAN_MODEL_PATH)
+    print("✅ Human model loaded")
+
+    # Start server
+    threading.Thread(target=run_server, daemon=True).start()
+    print("🌐 Server running at http://0.0.0.0:5000")
+
+    print("🟢 Waiting for source from web UI...")
+
+    while True:
+        with source_queue_lock:
+            new_source = source_queue.pop(0) if source_queue else None
+
+        if new_source:
+            print(f"🔄 New source received: {new_source}")
+
+            # Stop existing processing
+            if processing_thread and processing_thread.is_alive():
+                print("⏹ Stopping current stream...")
+                stop_processing.set()
+                processing_thread.join(timeout=5)
+                stop_processing.clear()
+                time.sleep(1)
+
+            # Start new processing
+            processing_thread = threading.Thread(
+                target=process_source,
+                args=(new_source,),
+                daemon=True
+            )
+            processing_thread.start()
+
+        else:
+            time.sleep(1)
+
+
+# -------------------------------
 if __name__ == "__main__":
     main()

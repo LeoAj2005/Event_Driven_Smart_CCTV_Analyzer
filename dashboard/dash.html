@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Intelligent_Object_Aware_Event_Modeling_for_Smart_Surveillance_and_Incident_Management</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <style>
+        :root {
+            --primary-green: #4ade80; /* The Fynix Green */
+            --dark-green: #15803d;
+            --bg-color: #f3f4f6;
+            --card-bg: #ffffff;
+            --text-dark: #1f2937;
+            --text-light: #9ca3af;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            display: flex;
+            height: 100vh;
+            color: var(--text-dark);
+        }
+
+        /* --- SIDEBAR --- */
+        .sidebar {
+            width: 250px;
+            background-color: var(--card-bg);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid #e5e7eb;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var(--text-dark);
+            margin-bottom: 40px;
+        }
+
+        .logo i {
+            color: var(--primary-green);
+        }
+
+        .user-profile {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px;
+            background-color: #f9fafb;
+            border-radius: 12px;
+            margin-bottom: 30px;
+            border: 1px solid #e5e7eb;
+        }
+
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            background-color: #d1d5db;
+            border-radius: 50%;
+            background-image: url('https://media.newyorker.com/photos/64bc4330ef09d4a0e04cb249/3:4/w_1278,h_1704,c_limit/Rosen-Messi-Miami.jpg');
+            background-size: cover;
+        }
+
+        .nav-menu {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .nav-item {
+            padding: 12px 16px;
+            border-radius: 10px;
+            color: var(--text-light);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            font-weight: 500;
+        }
+
+        .nav-item.active, .nav-item:hover {
+            background-color: var(--bg-color);
+            color: var(--dark-green);
+        }
+
+        .nav-item i { width: 20px; }
+
+        /* --- MAIN CONTENT --- */
+        .main-content {
+            flex: 1;
+            padding: 30px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .search-bar {
+            background: white;
+            padding: 10px 20px;
+            border-radius: 30px;
+            width: 400px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        }
+
+        .search-bar input {
+            border: none;
+            outline: none;
+            width: 100%;
+        }
+
+        /* --- DASHBOARD GRID --- */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            grid-template-rows: auto auto;
+            gap: 24px;
+        }
+
+        .col-left {
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        .col-right {
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        /* --- CARDS --- */
+        .card {
+            background: var(--card-bg);
+            border-radius: 20px;
+            padding: 24px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+            position: relative;
+        }
+
+        /* Hero Card (Green) */
+        .hero-card {
+            background: linear-gradient(135deg, #86efac 0%, #22c55e 100%);
+            color: #064e3b;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .hero-info h2 { font-size: 2.5rem; margin: 10px 0; }
+        .hero-status { 
+            background: rgba(255,255,255,0.3); 
+            padding: 5px 15px; 
+            border-radius: 20px; 
+            font-size: 0.9rem; 
+            font-weight: 600;
+        }
+        
+        .hero-actions button {
+            background: #064e3b;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 30px;
+            font-weight: bold;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+
+        /* Stat Cards Row */
+        .stats-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 20px;
+        }
+
+        .mini-stat {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        .mini-stat .label { color: var(--text-light); font-size: 0.9rem; display: flex; align-items: center; gap: 8px;}
+        .mini-stat .value { font-size: 1.5rem; font-weight: bold; }
+        .mini-stat .trend { font-size: 0.8rem; padding: 2px 8px; border-radius: 10px; }
+        .trend.up { background: #dcfce7; color: #166534; }
+        .trend.down { background: #fee2e2; color: #991b1b; }
+
+        /* Chart Section */
+        .chart-container { height: 300px; width: 100%; }
+
+        /* Live Feed Placeholder (Replacing AI Assistant) */
+        .live-feed-card {
+            background-color: #000;
+            color: white;
+            height: 350px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+            overflow: hidden;
+        }
+        .live-feed-overlay {
+            position: absolute;
+            top: 20px; left: 20px;
+            background: rgba(255,0,0,0.8);
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 0.8rem;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .blinking-dot {
+            width: 8px; height: 8px; background: white; border-radius: 50%;
+            animation: blink 1s infinite;
+        }
+        @keyframes blink { 50% { opacity: 0; } }
+
+        /* Recent Incidents List */
+        .transaction-list {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        .transaction-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #f3f4f6;
+        }
+        .t-icon {
+            width: 40px; height: 40px;
+            border-radius: 10px;
+            display: flex; align-items: center; justify-content: center;
+            margin-right: 15px;
+        }
+        .bg-red { background: #fee2e2; color: #dc2626; }
+        .bg-orange { background: #ffedd5; color: #ea580c; }
+        .bg-blue { background: #dbeafe; color: #2563eb; }
+
+        .t-info { flex: 1; }
+        .t-info h4 { font-size: 0.95rem; margin-bottom: 2px; }
+        .t-info p { font-size: 0.8rem; color: var(--text-light); }
+        .t-amount { font-weight: bold; font-size: 0.9rem; }
+
+        /* Score Card */
+        .score-card {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .score-value { font-size: 2rem; font-weight: bold; color: var(--text-dark); }
+        .score-label { color: var(--text-light); }
+        .progress-bar { height: 10px; width: 100px; background: #e5e7eb; border-radius: 5px; overflow: hidden;}
+        .progress-fill { height: 100%; background: var(--dark-green); width: 92%; }
+
+    </style>
+</head>
+<body>
+
+    <nav class="sidebar">
+        <div class="logo">
+            <i class="fas fa-shield-alt"></i> IOAEMSSIM
+        </div>
+
+        <div class="user-profile">
+            <div class="user-avatar"></div>
+            <div>
+                <h4 style="font-size: 0.9rem;">Admin User</h4>
+                <p style="font-size: 0.75rem; color: var(--text-light);">Security Lead</p>
+            </div>
+            <i class="fas fa-chevron-down" style="font-size: 0.7rem; margin-left: auto;"></i>
+        </div>
+
+        <ul class="nav-menu">
+            <li class="nav-item active"><i class="fas fa-th-large"></i> Dashboard</li>
+            <li class="nav-item"><i class="fas fa-video"></i> Live Feeds</li>
+            <li class="nav-item"><i class="fas fa-exclamation-triangle"></i> Incidents</li>
+            <li class="nav-item"><i class="fas fa-file-alt"></i> Reports</li>
+            <li class="nav-item"><i class="fas fa-wallet"></i> Analytics</li>
+            <li class="nav-item" style="margin-top: auto;"><i class="fas fa-cog"></i> Settings</li>
+            <li class="nav-item"><i class="fas fa-question-circle"></i> Help Center</li>
+        </ul>
+    </nav>
+
+    <div class="main-content">
+        
+        <div class="header">
+            <div>
+                <h2 style="color: var(--text-dark);">Overview</h2>
+                <p style="color: var(--text-light); font-size: 0.9rem;">"Real-time AI surveillance and threat detection active."</p>
+            </div>
+            <div class="search-bar">
+                <i class="fas fa-search" style="color: var(--text-light);"></i>
+                <input type="text" placeholder="Search logs, cameras, or events...">
+                <span style="border: 1px solid #e5e7eb; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; color: var(--text-light);">⌘ F</span>
+            </div>
+            <div style="display: flex; gap: 15px;">
+                <i class="fas fa-bell" style="font-size: 1.2rem; color: var(--text-dark);"></i>
+                <i class="fas fa-cog" style="font-size: 1.2rem; color: var(--text-dark);"></i>
+            </div>
+        </div>
+
+        <div class="dashboard-grid">
+            
+            <div class="col-left">
+                
+                <div class="card hero-card">
+                    <div class="hero-info">
+                        <span class="hero-status">● System Online</span>
+                        <h2>Secure</h2>
+                        <div style="display: flex; gap: 10px; margin-top: 10px;">
+                            <div style="background: rgba(255,255,255,0.2); padding: 5px 15px; border-radius: 20px; font-size: 0.8rem;">
+                                🛡️ AI Model: YOLO-26
+                            </div>
+                            <div style="background: rgba(255,255,255,0.2); padding: 5px 15px; border-radius: 20px; font-size: 0.8rem;">
+                                ⏱️ Uptime: 24h
+                            </div>
+                        </div>
+                    </div>
+                    <div class="hero-actions">
+                        <button><i class="fas fa-plus"></i> Add Camera</button>
+                    </div>
+                </div>
+
+                <div class="stats-row">
+                    <div class="card mini-stat">
+                        <div class="label"><i class="fas fa-crosshairs" style="color: #ef4444;"></i> Threats</div>
+                        <div class="value">12</div>
+                        <div><span class="trend down">+2 today</span></div>
+                    </div>
+                    <div class="card mini-stat">
+                        <div class="label"><i class="fas fa-user-clock" style="color: #f59e0b;"></i> Loitering</div>
+                        <div class="value">45</div>
+                        <div><span class="trend down">+5% vs avg</span></div>
+                    </div>
+                    <div class="card mini-stat">
+                        <div class="label"><i class="fas fa-check-circle" style="color: #22c55e;"></i> Scanned</div>
+                        <div class="value">8,420</div>
+                        <div><span class="trend up">Total Objects</span></div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
+                        <h3>Incident Frequency</h3>
+                        <select style="border: none; background: #f3f4f6; padding: 5px 10px; border-radius: 5px;">
+                            <option>This Year</option>
+                        </select>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="incidentChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
+                        <h3>Recent Alerts</h3>
+                        <i class="fas fa-sliders-h" style="color: var(--text-light);"></i>
+                    </div>
+                    <div class="transaction-list">
+                        <div class="transaction-item">
+                            <div style="display: flex; align-items: center;">
+                                <div class="t-icon bg-red"><i class="fas fa-gun"></i></div>
+                                <div class="t-info">
+                                    <h4>Weapon Detected</h4>
+                                    <p>Camera 01 - Main Gate</p>
+                                </div>
+                            </div>
+                            <div class="t-amount" style="color: #ef4444;">CRITICAL</div>
+                        </div>
+                        <div class="transaction-item">
+                            <div style="display: flex; align-items: center;">
+                                <div class="t-icon bg-orange"><i class="fas fa-running"></i></div>
+                                <div class="t-info">
+                                    <h4>Suspicious Running</h4>
+                                    <p>Camera 03 - Hallway</p>
+                                </div>
+                            </div>
+                            <div class="t-amount" style="color: #f59e0b;">WARNING</div>
+                        </div>
+                        <div class="transaction-item">
+                            <div style="display: flex; align-items: center;">
+                                <div class="t-icon bg-blue"><i class="fas fa-vector-square"></i></div>
+                                <div class="t-info">
+                                    <h4>Zone Violation</h4>
+                                    <p>Camera 02 - Server Room</p>
+                                </div>
+                            </div>
+                            <div class="t-amount" style="color: #2563eb;">INFO</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-right">
+                
+                <div class="card score-card">
+                    <div>
+                        <div class="score-label">Security Score</div>
+                        <div class="score-value">Excellent</div>
+                    </div>
+                    <div style="text-align: right;">
+                        <div style="font-size: 1.5rem; font-weight: bold;">92%</div>
+                        <div class="progress-bar"><div class="progress-fill"></div></div>
+                    </div>
+                </div>
+
+                <div class="card live-feed-card">
+                    <div class="live-feed-overlay">
+                        <div class="blinking-dot"></div> LIVE
+                    </div>
+                    <i class="fas fa-video-slash" style="font-size: 3rem; color: #555; margin-bottom: 10px;"></i>
+                    <p style="color: #aaa;">Waiting for RTSP Stream...</p>
+                    <div style="margin-top: 20px; background: #333; padding: 10px 20px; border-radius: 20px; font-size: 0.8rem;">
+                        Source: DroidCam-01
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+                        <h3>Alert Types</h3>
+                        <span style="background: #f3f4f6; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem;">Monthly</span>
+                    </div>
+                    <div style="height: 200px; display: flex; justify-content: center;">
+                        <canvas id="typeChart"></canvas>
+                    </div>
+                    <div style="text-align: center; margin-top: 15px;">
+                        <h2 style="margin: 0;">152</h2>
+                        <p style="color: var(--text-light); font-size: 0.8rem;">Total Alerts</p>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- MOCK DATA CHARTS ---
+        
+        // 1. Incident Frequency Chart (Bar)
+        const ctx1 = document.getElementById('incidentChart').getContext('2d');
+        new Chart(ctx1, {
+            type: 'bar',
+            data: {
+                labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct'],
+                datasets: [
+                    {
+                        label: 'Safe Objects',
+                        data: [4000, 3000, 4500, 4800, 3200, 5000, 4200, 4900, 3800, 4100],
+                        backgroundColor: '#1f2937', // Dark color for background data
+                        borderRadius: 4
+                    },
+                    {
+                        label: 'Threats',
+                        data: [120, 80, 150, 90, 200, 110, 85, 130, 95, 120],
+                        backgroundColor: '#4ade80', // The Fynix Green for alerts
+                        borderRadius: 4
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: { beginAtZero: true, grid: { display: false } },
+                    x: { grid: { display: false } }
+                },
+                plugins: { legend: { position: 'top', align: 'end' } }
+            }
+        });
+
+        // 2. Alert Type Chart (Donut)
+        const ctx2 = document.getElementById('typeChart').getContext('2d');
+        new Chart(ctx2, {
+            type: 'doughnut',
+            data: {
+                labels: ['Weapons', 'Intrusion', 'Loitering'],
+                datasets: [{
+                    data: [15, 35, 50],
+                    backgroundColor: ['#ef4444', '#f59e0b', '#4ade80'],
+                    borderWidth: 0,
+                    cutout: '75%'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } }
+            }
+        });
+    </script>
+</body>
+</html>

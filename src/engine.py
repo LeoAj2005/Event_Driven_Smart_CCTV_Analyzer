@@ -22,7 +22,7 @@ class StateEngine:
             return events
 
         for i, (tracker_id, xyxy) in enumerate(zip(detections.tracker_id, detections.xyxy)):
-            # Calculate Center Point of the Bounding Box
+            # Calculate Center Point
             center_x = (xyxy[0] + xyxy[2]) / 2
             center_y = (xyxy[1] + xyxy[3]) / 2
             center = (center_x, center_y)
@@ -38,7 +38,7 @@ class StateEngine:
             state = self.objects[tracker_id]
             state['positions'].append(center)
             
-            # Keep history short (last 30 frames) to save memory
+            # Keep history short (last 30 frames)
             if len(state['positions']) > 30: 
                 state['positions'].pop(0)
 
@@ -66,7 +66,6 @@ class StateEngine:
                     state['events_triggered'].add("loiter")
 
             # 🏃 EVENT C: SUDDEN RUNNING (Speed-Based)
-            # Compare current position to position 5 frames ago
             if len(state['positions']) > 5:
                 pos_now = np.array(state['positions'][-1])
                 pos_prev = np.array(state['positions'][-5])
@@ -75,8 +74,6 @@ class StateEngine:
                 distance = np.linalg.norm(pos_now - pos_prev)
                 
                 if distance > SUSPICIOUS_SPEED_THRESHOLD:
-                    # Note: We do NOT add to 'events_triggered' set because 
-                    # running is continuous behavior, we want continuous alerts.
                     events.append({
                         "type": "⚠️ FAST MOVEMENT", 
                         "id": tracker_id, 
