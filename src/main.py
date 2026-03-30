@@ -2,24 +2,25 @@ import cv2
 import supervision as sv
 from ultralytics import YOLO
 import os
-import sys
 import numpy as np
 import threading
 import time
 from datetime import datetime
+import subprocess
 
 from config import *
 from engine import StateEngine
 from incident import IncidentManager
 
-# 🔴 Flask server imports
+# Import the whole server module to access shared variables
+import server
 from server import (
     run_server,
-    video_frame,
-    frame_lock,
     new_incidents,
     source_queue,
-    source_queue_lock
+    source_queue_lock,
+    system_state,
+    system_state_lock
 )
 
 # -------------------------------
@@ -54,9 +55,13 @@ def download_youtube(url):
 # PROCESS A SINGLE SOURCE
 # -------------------------------
 def process_source(source):
-    global video_frame
-
     print(f"🎯 Starting processing for: {source}")
+
+    # Update state: processing started
+    with system_state_lock:
+        system_state["status"] = "PROCESSING"
+        system_state["frame"] = 0
+        system_state["message"] = f"Processing started for {source}"
 
     # Parse source
     if source.startswith('rtsp:'):
@@ -72,6 +77,9 @@ def process_source(source):
 
     if not cap.isOpened():
         print(f"❌ Cannot open source: {src}")
+        with system_state_lock:
+            system_state["status"] = "IDLE"
+            system_state["message"] = f"Failed to open source: {src}"
         return
 
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -84,18 +92,18 @@ def process_source(source):
     incident_manager = IncidentManager()
 
     # --- Visualization ---
-    box_ann_human = sv.BoxAnnotator(thickness=2, color=sv.ColorPalette.DEFAULT)
-    lbl_ann_human = sv.LabelAnnotator(text_scale=0.5, color=sv.ColorPalette.DEFAULT)
+    box_ann_human = sv.BoxAnnotator(thickness=2)
+    lbl_ann_human = sv.LabelAnnotator(text_scale=0.5)
 
     box_ann_gun = sv.BoxAnnotator(thickness=4, color=sv.Color.RED)
-    lbl_ann_gun = sv.LabelAnnotator(text_scale=0.8, color=sv.Color.RED, text_color=sv.Color.WHITE)
+    lbl_ann_gun = sv.LabelAnnotator(text_scale=0.8, color=sv.Color.RED)
 
     zone_ann = sv.PolygonZoneAnnotator(zone=brain.zone, color=sv.Color.RED, thickness=2)
     trace_ann = sv.TraceAnnotator(thickness=2, trace_length=30)
 
     out = cv2.VideoWriter(
         "/app/output/final_stream.mp4",
-        cv2.VideoWriter_fourcc(*'mp4v'),
+        cv2.VideoWriter_fourcc(*'avc1'),
         fps,
         (width, height)
     )
@@ -113,6 +121,11 @@ def process_source(source):
         frame_count += 1
         if frame_count % 30 == 0:
             print(f"✅ Processing Frame {frame_count}", flush=True)
+
+        # Update shared frame count every 10 frames (avoid overhead)
+        if frame_count % 10 == 0:
+            with system_state_lock:
+                system_state["frame"] = frame_count
 
         incident_manager.update_buffer(frame.copy())
         incident_manager.process_recording(frame)
@@ -145,60 +158,75 @@ def process_source(source):
                     e['type'], e['id'], e['conf']
                 )
 
-                incident_dict = {
+                new_incidents.append({
                     "timestamp": datetime.now().isoformat(),
                     "event": e['type'],
                     "object_id": e['id'],
                     "confidence": e['conf'],
                     "camera_id": "MAIN_GATE_CAM"
-                }
-
-                new_incidents.append(incident_dict)
+                })
 
                 incident_manager.trigger_clip_recording(
                     incident_id, width, height, fps
                 )
 
-                cv2.putText(
-                    frame, f"ALERT: {e['type']}",
-                    (50, 100), cv2.FONT_HERSHEY_SIMPLEX,
-                    1.5, (0, 0, 255), 4
-                )
-
         # --- DRAW ---
+        # 1. Draw the restricted zone
+        frame = zone_ann.annotate(scene=frame)
+
+        # 2. Draw Human boxes and labels
         if len(dets_human) > 0:
-            if dets_human.tracker_id is not None:
-                labels = [f"Person #{i}" for i in dets_human.tracker_id]
-                frame = trace_ann.annotate(frame, dets_human)
-            else:
-                labels = [f"Person ({c:.2f})" for c in dets_human.confidence]
+            frame = box_ann_human.annotate(scene=frame, detections=dets_human)
+            frame = lbl_ann_human.annotate(scene=frame, detections=dets_human)
 
-            frame = box_ann_human.annotate(frame, dets_human)
-            frame = lbl_ann_human.annotate(frame, dets_human, labels=labels)
-
+        # 3. Draw Gun boxes and labels
         if len(dets_gun) > 0:
-            if dets_gun.tracker_id is not None:
-                labels = [
-                    f"WEAPON #{i} ({c:.2f})"
-                    for i, c in zip(dets_gun.tracker_id, dets_gun.confidence)
-                ]
-            else:
-                labels = [f"WEAPON ({c:.2f})" for c in dets_gun.confidence]
+            frame = box_ann_gun.annotate(scene=frame, detections=dets_gun)
+            frame = lbl_ann_gun.annotate(scene=frame, detections=dets_gun)
 
-            frame = box_ann_gun.annotate(frame, dets_gun)
-            frame = lbl_ann_gun.annotate(frame, dets_gun, labels=labels)
+        # -------------------------------
+        # PUSH TO LIVE STREAM (MJPEG)
+        # -------------------------------
+        with server.frame_lock:
+            server.video_frame = frame.copy()
 
-        frame = zone_ann.annotate(frame)
-
-        # --- STREAM FRAME ---
-        with frame_lock:
-            video_frame = frame.copy()
+        # ✅ Debug print (every 30 frames)
+        if frame_count % 30 == 0:
+            print("📡 Frame pushed to server")
 
         out.write(frame)
 
+    # Clean up
     cap.release()
-    out.release()
+    out.release()   # This is the moment the MP4 becomes playable
     print(f"🛑 Stopped processing: {source}")
+
+    # Update state: done or idle
+    with system_state_lock:
+        if stop_processing.is_set():
+            # Stopped due to new source
+            system_state["status"] = "IDLE"
+            system_state["message"] = "Processing stopped for new source"
+        else:
+            system_state["status"] = "DONE"
+            system_state["message"] = "Processing complete."
+
+    # 🎬 Convert to HLS for streaming (optional)
+    print("🎬 Converting to HLS...")
+    output_dir = "/app/output"
+    os.makedirs(output_dir, exist_ok=True)
+    subprocess.run([
+        "ffmpeg",
+        "-y",
+        "-i", "/app/output/final_stream.mp4",
+        "-codec:", "copy",
+        "-start_number", "0",
+        "-hls_time", "2",
+        "-hls_list_size", "0",
+        "-f", "hls",
+        "/app/output/stream.m3u8"
+    ], check=True)
+    print("✅ HLS conversion complete")
 
 
 # -------------------------------
@@ -209,7 +237,7 @@ def main():
 
     print("🚀 INITIALIZING SYSTEM...")
 
-    # Load models once
+    # Load models
     if os.path.exists(GUN_MODEL_PATH):
         gun_model = YOLO(GUN_MODEL_PATH)
         print("✅ Weapon model loaded")
@@ -220,9 +248,8 @@ def main():
     human_model = YOLO(HUMAN_MODEL_PATH)
     print("✅ Human model loaded")
 
-    # Start server
+    # Start Flask server
     threading.Thread(target=run_server, daemon=True).start()
-    print("🌐 Server running at http://0.0.0.0:5000")
 
     print("🟢 Waiting for source from web UI...")
 
@@ -233,7 +260,6 @@ def main():
         if new_source:
             print(f"🔄 New source received: {new_source}")
 
-            # Stop existing processing
             if processing_thread and processing_thread.is_alive():
                 print("⏹ Stopping current stream...")
                 stop_processing.set()
@@ -241,7 +267,6 @@ def main():
                 stop_processing.clear()
                 time.sleep(1)
 
-            # Start new processing
             processing_thread = threading.Thread(
                 target=process_source,
                 args=(new_source,),
@@ -253,6 +278,5 @@ def main():
             time.sleep(1)
 
 
-# -------------------------------
 if __name__ == "__main__":
     main()

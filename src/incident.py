@@ -5,6 +5,7 @@ import os
 from collections import deque
 from datetime import datetime
 import numpy as np
+import pytz  # ✅ Added for IST timezone
 
 class IncidentManager:
     def __init__(self, output_dir="/app/output"):
@@ -30,12 +31,16 @@ class IncidentManager:
         self.frame_buffer.append(frame)
 
     def log_event(self, event_type, obj_id, conf):
-        """Logs event to JSONL file."""
+        """Logs event to JSONL file with IST timestamp."""
         safe_id = int(obj_id)
         safe_conf = float(conf)
         
+        # ✅ FIX: Use IST timezone
+        ist = pytz.timezone("Asia/Kolkata")
+        timestamp = datetime.now(ist).isoformat()
+        
         payload = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": timestamp,
             "event": event_type,
             "object_id": safe_id,
             "confidence": safe_conf,

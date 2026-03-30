@@ -44,6 +44,7 @@ RUN pip install --no-cache-dir \
     python-dotenv \
     flask \
     flask-cors \
+    pytz \
     yt-dlp
 
 
@@ -57,4 +58,4 @@ COPY . /app
 # -------------------------------
 # RUN APP
 # -------------------------------
-CMD ["python", "src/main.py"]
+CMD ["python", "main.py"]
