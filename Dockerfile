@@ -43,6 +43,7 @@ RUN pip install --no-cache-dir \
     numpy \
     python-dotenv \
     flask \
+    ffmpeg \
     flask-cors \
     pytz \
     yt-dlp
@@ -58,4 +59,4 @@ COPY . /app
 # -------------------------------
 # RUN APP
 # -------------------------------
-CMD ["python", "main.py"]
+CMD ["python", "src/main.py"]

@@ -1,35 +1,26 @@
-import json
 import os
 import threading
-import time
-import cv2
 import socket
-from flask import Flask, Response, jsonify, request, render_template_string, send_file
-from flask_cors import CORS
+import json
+from flask import Flask, jsonify, request, render_template_string, send_file
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
-CORS(app)
 
-# --- SHARED MEMORY & STATE ---
-video_frame = None
-frame_lock = threading.Lock()
-
-source_queue = []
-source_queue_lock = threading.Lock()
-new_incidents = []
-
-# Tracks exactly what the AI is doing for the UI
+# --- GLOBAL SHARED STATE ---
 system_state = {
-    "status": "IDLE",
-    "frame": 0,
-    "message": "Waiting for video..."
+    "status": "IDLE",  # IDLE, PROCESSING, DONE
+    "logs": "Waiting for a video...",
+    "queue": []
 }
-system_state_lock = threading.Lock()  # for safe updates
+state_lock = threading.Lock()
+
+# 🔥 NEW: Alert Queue for the Flutter App
+unread_alerts = []
+alerts_lock = threading.Lock()
 
 UPLOAD_FOLDER = "/app/uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 def get_local_ip():
     try:
@@ -37,205 +28,182 @@ def get_local_ip():
         s.connect(("8.8.8.8", 80))
         ip = s.getsockname()[0]
         s.close()
-    except Exception:
-        ip = "127.0.0.1"
-    return ip
+        return ip
+    except:
+        return "127.0.0.1"
 
 # --- HTML TEMPLATES ---
-HTML_MAIN = '''
+HTML_INDEX = '''
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Security System Controller</title>
+    <title>AI Security System</title>
     <style>
-        body { font-family: Arial; margin: 40px; background: #f4f6f9; }
-        .card { background: white; border: 1px solid #ddd; padding: 20px; margin-bottom: 20px; border-radius: 10px; }
-        input, button { padding: 10px; margin: 5px; }
-        button { background: #007bff; color: white; border: none; cursor: pointer; border-radius: 5px; }
-        button:hover { background: #0056b3; }
-        h1 { color: #333; }
+        body { font-family: Arial; background: #f4f6f9; text-align: center; padding-top: 50px; }
+        .card { background: white; border-radius: 10px; padding: 30px; display: inline-block; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        button { background: #007bff; color: white; border: none; padding: 10px 20px; font-size: 16px; border-radius: 5px; cursor: pointer; margin-top: 15px; }
     </style>
 </head>
 <body>
-    <h1>🚀 Security System Controller</h1>
     <div class="card">
-        <h3>📁 Upload & Process Video</h3>
+        <h2>🚀 Upload Video for AI Analysis</h2>
         <form action="/upload" method="post" enctype="multipart/form-data">
-            <input type="file" name="file" accept="video/*">
-            <button type="submit">Upload & Start AI</button>
+            <input type="file" name="file" accept="video/*" required><br>
+            <button type="submit">Process Video</button>
         </form>
-    </div>
-    <div class="card">
-        <h3>📊 Check Processing Status & Play</h3>
-        <a href="/play" target="_blank"><button>Open Player / Tracker</button></a>
     </div>
 </body>
 </html>
 '''
 
+HTML_PLAY = '''
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Processing AI...</title>
+    <style>
+        body { background:#111; color:white; text-align:center; font-family: Arial; padding-top: 50px;}
+        .container { max-width: 800px; margin: auto; }
+        #loader { padding: 40px; border: 2px dashed #444; border-radius: 10px; }
+        #log-text { color: #0f0; font-family: monospace; font-size: 18px; margin-top: 20px;}
+        #player-container { display: none; }
+        video { width: 100%; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
+        .spinner { display: inline-block; width: 40px; height: 40px; border: 4px solid rgba(255,255,255,.3); border-radius: 50%; border-top-color: #fff; animation: spin 1s ease-in-out infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div id="loader">
+            <div class="spinner"></div>
+            <h2>AI is Analyzing the Footage</h2>
+            <div id="log-text">Initializing Engine...</div>
+        </div>
+
+        <div id="player-container">
+            <h2>✅ Analysis Complete</h2>
+            <video id="final-video" controls>
+                <source src="/processed_video" type="video/mp4">
+            </video>
+            <br><br>
+            <a href="/"><button style="padding:10px; cursor:pointer;">Analyze Another</button></a>
+        </div>
+    </div>
+
+    <script>
+        const loader = document.getElementById('loader');
+        const player = document.getElementById('player-container');
+        const logText = document.getElementById('log-text');
+        const videoElement = document.getElementById('final-video');
+
+        const interval = setInterval(() => {
+            fetch('/api/status')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.status === "PROCESSING") {
+                        logText.innerText = data.logs;
+                    } 
+                    else if (data.status === "DONE") {
+                        clearInterval(interval);
+                        loader.style.display = "none";
+                        player.style.display = "block";
+                        
+                        // 🔥 FIX: Add a timestamp to bypass browser cache!
+                        videoElement.src = "/processed_video?t=" + new Date().getTime();
+                        videoElement.load();
+                        videoElement.play();
+                    }
+                });
+        }, 1000);
+    </script>
+</body>
+</html>
+'''
+
+# --- ROUTES (Web UI) ---
 @app.route('/')
 def index():
-    return render_template_string(HTML_MAIN)
+    return render_template_string(HTML_INDEX)
 
 @app.route('/upload', methods=['POST'])
-def upload_file():
-    if 'file' not in request.files:
-        return "No file", 400
-    file = request.files['file']
-    if file.filename == '':
-        return "No file selected", 400
+def upload():
+    file = request.files.get('file')
+    if not file or file.filename == '':
+        return "No file uploaded", 400
 
     filename = secure_filename(file.filename)
-    path = os.path.join(UPLOAD_FOLDER, filename)
-    file.save(path)
+    filepath = os.path.join(UPLOAD_FOLDER, filename)
+    file.save(filepath)
 
-    with source_queue_lock:
-        source_queue.append(f'file:{path}')
+    with state_lock:
+        system_state["queue"].append(filepath)
+        system_state["status"] = "PROCESSING"
+        system_state["logs"] = f"Queued {filename} for analysis..."
 
-    # Update state so the UI knows we queued a file
-    with system_state_lock:
-        system_state["status"] = "QUEUED"
-        system_state["message"] = f"Queued: {filename}"
+    print(f"📥 File received and queued: {filepath}", flush=True)
+    return render_template_string(HTML_PLAY)
 
-    return '''
-    <script>
-        window.location.href = "/play";
-    </script>
-    '''
-
-# 🔥 CRITICAL: The UI needs this endpoint to get progress updates
-@app.route('/status')
-def get_status():
-    with system_state_lock:
+@app.route('/api/status')
+def status():
+    with state_lock:
         return jsonify(system_state)
 
-@app.route('/play')
-def play_video():
-    return '''
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>AI Processing Tracker</title>
-        <style>
-            body { background:#111; color:white; text-align:center; font-family: Arial; padding-top: 50px;}
-            #video-container { display: none; margin-top: 20px;}
-            video { width: 100%; max-width: 800px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
-            #logs { color: #0f0; font-family: monospace; margin-top: 20px; font-size: 18px;}
-        </style>
-    </head>
-    <body>
-      <h2 id="title">🔍 Checking AI Status...</h2>
-      <div id="logs">Connecting to engine...</div>
-
-      <div id="video-container">
-          <video id="final-video" controls>
-            <source src="/final_video_file" type="video/mp4">
-          </video>
-      </div>
-
-      <script>
-        const interval = setInterval(() => {
-            fetch('/status')
-                .then(res => res.json())
-                .then(data => {
-                    const title = document.getElementById('title');
-                    const logs = document.getElementById('logs');
-                    const videoContainer = document.getElementById('video-container');
-
-                    if (data.status === "PROCESSING") {
-                        title.innerText = "⚙️ AI is Analyzing Video...";
-                        logs.innerText = "Processing Frame: " + data.frame;
-                    }
-                    else if (data.status === "DONE") {
-                        title.innerText = "✅ Processing Complete!";
-                        logs.innerText = "Video is ready.";
-                        videoContainer.style.display = "block";
-                        // Force video to reload to grab the newly finished file
-                        document.getElementById('final-video').load();
-                        clearInterval(interval);
-                    }
-                    else {
-                        logs.innerText = data.message;
-                    }
-                })
-                .catch(err => console.error("Error fetching status:", err));
-        }, 1000);
-      </script>
-    </body>
-    </html>
-    '''
-
-@app.route('/final_video_file')
-def final_video_file():
+@app.route('/processed_video')
+def processed_video():
     path = "/app/output/final_stream.mp4"
     if not os.path.exists(path):
-        return "Video not found", 404
+        return "Video not ready", 404
     return send_file(path, mimetype="video/mp4")
 
-# 🔥 PREVENTS THE 500 ERROR: Safely checks if HLS files exist
-@app.route('/hls/<path:filename>')
-def hls_files(filename):
-    filepath = os.path.join("/app/output", filename)
-    if not os.path.exists(filepath):
-        return "HLS stream not ready yet", 404
-    return send_file(filepath)
+# --- API ENDPOINTS FOR FLUTTER APP ---
+@app.route('/api/upload', methods=['POST'])
+def api_upload():
+    """JSON endpoint for Flutter app to upload videos"""
+    file = request.files.get('file')
+    if not file or file.filename == '':
+        return jsonify({"error": "No file uploaded"}), 400
 
-# -------------------------------
-# MJPEG Stream Endpoint (for live RTSP/YouTube)
-# -------------------------------
-def generate_frames():
-    while True:
-        with frame_lock:
-            if video_frame is None:
-                time.sleep(0.1)
-                continue
+    filename = secure_filename(file.filename)
+    filepath = os.path.join(UPLOAD_FOLDER, filename)
+    file.save(filepath)
 
-            success, buffer = cv2.imencode('.jpg', video_frame)
-            if not success:
-                continue
+    with state_lock:
+        system_state["queue"].append(filepath)
+        system_state["status"] = "PROCESSING"
+        system_state["logs"] = f"Queued {filename} for analysis..."
 
-        frame_bytes = buffer.tobytes()
-        yield (b'--frame\r\n'
-               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-        time.sleep(0.03)
+    return jsonify({"success": True, "message": "Video queued for AI analysis"}), 200
 
-@app.route('/video')
-def video():
-    return Response(generate_frames(),
-                    mimetype='multipart/x-mixed-replace; boundary=frame')
-
-# -------------------------------
-# Existing routes for RTSP/YouTube, logs, etc.
-# -------------------------------
-@app.route('/set_source', methods=['POST'])
-def set_source():
-    rtsp_url = request.form.get('rtsp_url')
-    youtube_url = request.form.get('youtube_url')
-    if rtsp_url:
-        source = f'rtsp:{rtsp_url}'
-    elif youtube_url:
-        source = f'youtube:{youtube_url}'
-    else:
-        return "❌ No source provided", 400
-    with source_queue_lock:
-        source_queue.append(source)
-    return f"✅ Source queued: {source}"
-
-@app.route('/logs')
-def get_logs():
+@app.route('/api/logs', methods=['GET'])
+def api_logs():
+    """JSON endpoint to retrieve incident logs"""
     log_file = "/app/output/logs/incidents.jsonl"
     incidents = []
+    
     if os.path.exists(log_file):
         with open(log_file, 'r') as f:
             for line in f:
-                incidents.append(json.loads(line))
-    return jsonify(incidents)
+                try:
+                    incidents.append(json.loads(line.strip()))
+                except json.JSONDecodeError:
+                    continue
+                    
+    return jsonify({"incidents": incidents}), 200
+
+@app.route('/api/alerts/poll', methods=['GET'])
+def poll_alerts():
+    """Flutter calls this every 2 seconds. It returns new alerts and clears the queue."""
+    global unread_alerts
+    with alerts_lock:
+        # Copy current alerts and instantly clear the queue
+        alerts_to_send = list(unread_alerts)
+        unread_alerts.clear()
+        
+    return jsonify({"alerts": alerts_to_send}), 200
 
 def run_server():
     ip = get_local_ip()
-    print(f"🌐 Server running at: http://{ip}:5000")
-    print(f"➡️  Upload page: http://{ip}:5000")
-    print(f"➡️  Status tracker: http://{ip}:5000/play")
+    print(f"\n🌐 Web UI Available at: http://{ip}:5000\n", flush=True)
     app.run(host='0.0.0.0', port=5000, threaded=True)
 
 if __name__ == "__main__":
