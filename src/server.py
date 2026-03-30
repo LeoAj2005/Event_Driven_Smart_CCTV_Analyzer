@@ -2,7 +2,8 @@ import os
 import threading
 import socket
 import json
-from flask import Flask, jsonify, request, render_template_string, send_file
+# 🔥 Added send_from_directory here
+from flask import Flask, jsonify, request, render_template_string, send_file, send_from_directory
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
@@ -108,7 +109,7 @@ HTML_PLAY = '''
                         loader.style.display = "none";
                         player.style.display = "block";
                         
-                        // 🔥 FIX: Add a timestamp to bypass browser cache!
+                        // 🔥 Add a timestamp to bypass browser cache!
                         videoElement.src = "/processed_video?t=" + new Date().getTime();
                         videoElement.load();
                         videoElement.play();
@@ -154,6 +155,13 @@ def processed_video():
     if not os.path.exists(path):
         return "Video not ready", 404
     return send_file(path, mimetype="video/mp4")
+
+# 🔥 NEW: The exact route you requested for reliable static serving
+@app.route('/static/final_stream.mp4')
+def serve_final_video():
+    # Make sure this points to the exact folder where final_stream.mp4 is saved
+    output_directory = '/app/output' 
+    return send_from_directory(output_directory, 'final_stream.mp4')
 
 # --- API ENDPOINTS FOR FLUTTER APP ---
 @app.route('/api/upload', methods=['POST'])
